@@ -762,7 +762,8 @@ enum GatherType
 
 enum GatherCaseFlags
 {
-	GATHERCASE_DONT_SAMPLE_CUBE_CORNERS	= (1<<0)	//!< For cube map cases: do not sample cube corners
+	GATHERCASE_DONT_SAMPLE_CUBE_CORNERS	= (1<<0),	//!< For cube map cases: do not sample cube corners
+	GATHERCASE_UNNORMALIZED_COORDINATES = (1<<1)
 };
 
 enum OffsetSize
@@ -1355,9 +1356,10 @@ bool TextureGatherInstance::verify (const ConstPixelBufferAccess&	rendered,
 														: m_baseParams.textureType == TEXTURETYPE_2D_ARRAY		? IVec3(7,7,7)
 														: IVec3(-1);
 		tcu::Sampler					sampler;
-		sampler.wrapS		= m_baseParams.wrapS;
-		sampler.wrapT		= m_baseParams.wrapT;
-		sampler.compare		= m_baseParams.shadowCompareMode;
+		sampler.wrapS				= m_baseParams.wrapS;
+		sampler.wrapT				= m_baseParams.wrapT;
+		sampler.compare				= m_baseParams.shadowCompareMode;
+		sampler.normalizedCoords	= !(m_baseParams.flags & GATHERCASE_UNNORMALIZED_COORDINATES);
 
 		if (isDepthFormat(m_baseParams.textureFormat))
 		{
@@ -1698,8 +1700,14 @@ TextureGather2DInstance::~TextureGather2DInstance (void)
 
 vector<float> TextureGather2DInstance::computeQuadTexCoord (int /* iterationNdx */) const
 {
-	vector<float> res;
-	TextureTestUtil::computeQuadTexCoord2D(res, Vec2(-0.3f, -0.4f), Vec2(1.5f, 1.6f));
+	const bool		unnorm = (m_baseParams.flags & GATHERCASE_UNNORMALIZED_COORDINATES) != 0;
+	const Vec2		textureSize = Vec2(float(m_textureSize[0]), float(m_textureSize[1]));
+	const Vec2		bottomLeftNorm = Vec2(-0.3f, -0.4f);
+	const Vec2		topRightNorm = Vec2(1.5f, 1.6f);
+	const Vec2		bottomLeft = unnorm ? bottomLeftNorm * textureSize : bottomLeftNorm;
+	const Vec2		topRight = unnorm ? topRightNorm * textureSize : topRightNorm;
+	vector<float>	res;
+	TextureTestUtil::computeQuadTexCoord2D(res, bottomLeft, topRight);
 	return res;
 }
 
@@ -1707,10 +1715,17 @@ TextureBindingSp TextureGather2DInstance::createTexture (void)
 {
 	TestLog&						log			= m_context.getTestContext().getLog();
 	const tcu::TextureFormatInfo	texFmtInfo	= tcu::getTextureFormatInfo(m_baseParams.textureFormat);
-	MovePtr<tcu::Texture2D>			texture		= MovePtr<tcu::Texture2D>(new tcu::Texture2D(m_baseParams.textureFormat, m_textureSize.x(), m_textureSize.y()));
+	MovePtr<tcu::Texture2D>			texture;
 	const tcu::Sampler				sampler		(m_baseParams.wrapS, m_baseParams.wrapT, tcu::Sampler::REPEAT_GL,
 												 m_baseParams.minFilter, m_baseParams.magFilter,
-												 0.0f /* LOD threshold */, true /* normalized coords */, m_baseParams.shadowCompareMode);
+												 0.0f /* LOD threshold */, !(m_baseParams.flags & GATHERCASE_UNNORMALIZED_COORDINATES),
+												 m_baseParams.shadowCompareMode);
+
+	// Samplers with unnormalized coordinates cannot be bound to textures with multiple levels.
+	if (m_baseParams.flags & GATHERCASE_UNNORMALIZED_COORDINATES)
+		texture = MovePtr<tcu::Texture2D>(new tcu::Texture2D(m_baseParams.textureFormat, m_textureSize.x(), m_textureSize.y(), 1));
+	else
+		texture = MovePtr<tcu::Texture2D>(new tcu::Texture2D(m_baseParams.textureFormat, m_textureSize.x(), m_textureSize.y()));
 
 	{
 		const int	levelBegin	= m_baseParams.baseLevel;
@@ -2560,6 +2575,20 @@ void TextureGatherTests::init (void)
 																			   MaybeTextureSwizzle::createNoneTextureSwizzle(), tcu::Sampler::NEAREST, tcu::Sampler::NEAREST,
 																			   baseLevel, IVec3(64, 64, 3), 0, ShaderRenderCaseInstance::IMAGE_BACKING_MODE_SPARSE));
 							}
+						}
+
+						if (textureType == TEXTURETYPE_2D && !isDepthFormat(format))
+						{
+							TestCaseGroup* const unnormGroup = new TestCaseGroup(m_testCtx, "unnorm", "");
+							formatGroup->addChild(unnormGroup);
+							unnormGroup->addChild(makeTextureGatherCase(textureType, m_testCtx, "normal", "", gatherType, offsetSize, format,
+																		tcu::Sampler::COMPAREMODE_NONE, tcu::Sampler::CLAMP_TO_EDGE, tcu::Sampler::CLAMP_TO_EDGE,
+																		MaybeTextureSwizzle::createNoneTextureSwizzle(), tcu::Sampler::NEAREST, tcu::Sampler::NEAREST,
+																		0, IVec3(64, 64, 1), GATHERCASE_UNNORMALIZED_COORDINATES));
+							unnormGroup->addChild(makeTextureGatherCase(textureType, m_testCtx, "sparse", "", gatherType, offsetSize, format,
+																		tcu::Sampler::COMPAREMODE_NONE, tcu::Sampler::CLAMP_TO_EDGE, tcu::Sampler::CLAMP_TO_EDGE,
+																		MaybeTextureSwizzle::createNoneTextureSwizzle(), tcu::Sampler::NEAREST, tcu::Sampler::NEAREST,
+																		0, IVec3(64, 64, 1), GATHERCASE_UNNORMALIZED_COORDINATES, ShaderRenderCaseInstance::IMAGE_BACKING_MODE_SPARSE));
 						}
 					}
 				}
