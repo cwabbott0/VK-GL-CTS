@@ -1515,7 +1515,28 @@ public:
 							 aspectMask);									// VkImageAspectFlags		aspectMask;
 
 		beginRenderPass(VK_SUBPASS_CONTENTS_INLINE, m_params.initValue);
-		m_vkd.cmdClearAttachments(*m_commandBuffer, 1, &clearAttachment, static_cast<deUint32>(clearRects.size()), &clearRects[0]);
+		if (m_imageAspectFlags == (VK_IMAGE_ASPECT_STENCIL_BIT | VK_IMAGE_ASPECT_DEPTH_BIT)) {
+			const VkClearDepthStencilValue _depthClear = { m_params.clearValue[0].depthStencil.depth, 0 };
+			const VkClearDepthStencilValue _stencilClear = { 0, m_params.clearValue[0].depthStencil.stencil };
+			const VkClearValue depthClear = { .depthStencil = _depthClear };
+			const VkClearValue stencilClear = { .depthStencil = _stencilClear };
+			const VkClearAttachment stencilAttachment =
+			{
+				VK_IMAGE_ASPECT_STENCIL_BIT,		// VkImageAspectFlags	aspectMask;
+				0u,									// deUint32				colorAttachment;
+				stencilClear				// VkClearValue			clearValue;
+			};
+			m_vkd.cmdClearAttachments(*m_commandBuffer, 1, &stencilAttachment, static_cast<deUint32>(clearRects.size()), &clearRects[0]);
+			const VkClearAttachment depthAttachment =
+			{
+				VK_IMAGE_ASPECT_DEPTH_BIT,			// VkImageAspectFlags	aspectMask;
+				0u,									// deUint32				colorAttachment;
+				depthClear				// VkClearValue			clearValue;
+			};
+			m_vkd.cmdClearAttachments(*m_commandBuffer, 1, &depthAttachment, static_cast<deUint32>(clearRects.size()), &clearRects[0]);
+		} else {
+			m_vkd.cmdClearAttachments(*m_commandBuffer, 1, &clearAttachment, static_cast<deUint32>(clearRects.size()), &clearRects[0]);
+		}
 		endRenderPass(m_vkd, *m_commandBuffer);
 
 		pipelineImageBarrier(VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,			// VkPipelineStageFlags		srcStageMask
