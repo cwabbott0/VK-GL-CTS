@@ -2846,7 +2846,7 @@ tcu::TestStatus BlittingImages::checkTestResult (tcu::ConstPixelBufferAccess res
 		}
 		else
 		{
-			const tcu::TextureFormat	sourceFormat	= mapVkFormat(m_params.src.image.format);
+			const tcu::TextureFormat	sourceFormat	= m_sourceTextureLevel->getFormat();
 
 			if (!checkLinearFilteredResult(result, m_expectedTextureLevel[0]->getAccess(), m_unclampedExpectedTextureLevel->getAccess(), sourceFormat))
 				return tcu::TestStatus::fail(failMessage);
