@@ -34,6 +34,7 @@
 #include "tcuVectorUtil.hpp"
 #include "tcuTestLog.hpp"
 #include "tcuTexLookupVerifier.hpp"
+#include "tcuAstcUtil.hpp"
 
 #include "vkImageUtil.hpp"
 #include "vkMemUtil.hpp"
@@ -324,9 +325,11 @@ protected:
 	VkCommandBufferBeginInfo			m_cmdBufferBeginInfo;
 
 	void								generateBuffer						(tcu::PixelBufferAccess buffer, int width, int height, int depth = 1, FillMode = FILL_MODE_GRADIENT);
+	void								generateCompressedBuffer			(tcu::CompressedTexture &compressed, tcu::PixelBufferAccess decompressed);
 	virtual void						generateExpectedResult				(void);
 	void								uploadBuffer						(tcu::ConstPixelBufferAccess bufferAccess, const Allocation& bufferAlloc);
 	void								uploadImage							(const tcu::ConstPixelBufferAccess& src, VkImage dst, const ImageParms& parms, const deUint32 mipLevels = 1u);
+	void								uploadCompressedImage				(const tcu::CompressedTexture& src, VkImage dst, const ImageParms& parms);
 	virtual tcu::TestStatus				checkTestResult						(tcu::ConstPixelBufferAccess result);
 	virtual void						copyRegionToTextureLevel			(tcu::ConstPixelBufferAccess src, tcu::PixelBufferAccess dst, CopyRegion region, deUint32 mipLevel = 0u) = 0;
 	deUint32							calculateSize						(tcu::ConstPixelBufferAccess src) const
@@ -446,6 +449,33 @@ void CopiesAndBlittingTestInstance::generateBuffer (tcu::PixelBufferAccess buffe
 				break;
 		}
 	}
+}
+
+void CopiesAndBlittingTestInstance::generateCompressedBuffer (tcu::CompressedTexture &compressed, tcu::PixelBufferAccess decompressed)
+{
+	// Generate random compressed data and update decompressed data
+
+	de::Random random(123);
+
+	deUint8* const	compressedData		= (deUint8*)compressed.getData();
+	tcu::CompressedTexFormat format		= compressed.getFormat();
+
+	if (tcu::isAstcFormat(format))
+	{
+		// \todo [2016-01-20 pyry] Comparison doesn't currently handle invalid blocks correctly so we use only valid blocks
+		tcu::astc::generateRandomValidBlocks(compressedData, compressed.getDataSize()/tcu::astc::BLOCK_SIZE_BYTES,
+											 format, tcu::TexDecompressionParams::ASTCMODE_LDR, random.getUint32());
+	}
+	else
+	{
+		// Generate random compressed data
+		// Random initial values cause assertion during the decompression in case of COMPRESSEDTEXFORMAT_ETC1_RGB8 format
+		if (format != tcu::COMPRESSEDTEXFORMAT_ETC1_RGB8)
+			for (int byteNdx = 0; byteNdx < compressed.getDataSize(); byteNdx++)
+				compressedData[byteNdx] = 0xFF & random.getUint32();
+	}
+
+	compressed.decompress(decompressed, tcu::TexDecompressionParams(tcu::TexDecompressionParams::ASTCMODE_LDR));
 }
 
 void CopiesAndBlittingTestInstance::uploadBuffer (tcu::ConstPixelBufferAccess bufferAccess, const Allocation& bufferAlloc)
@@ -614,6 +644,127 @@ void CopiesAndBlittingTestInstance::uploadImage (const tcu::ConstPixelBufferAcce
 	}
 	else
 		uploadImageAspect(src, dst, parms, mipLevels);
+}
+
+void CopiesAndBlittingTestInstance::uploadCompressedImage (const tcu::CompressedTexture& src, VkImage image, const ImageParms& parms)
+{
+	const InstanceInterface&		vki					= m_context.getInstanceInterface();
+	const DeviceInterface&			vk					= m_context.getDeviceInterface();
+	const VkPhysicalDevice			vkPhysDevice		= m_context.getPhysicalDevice();
+	const VkDevice					vkDevice			= m_context.getDevice();
+	const VkQueue					queue				= m_context.getUniversalQueue();
+	const deUint32					queueFamilyIndex	= m_context.getUniversalQueueFamilyIndex();
+	Allocator&						memAlloc			= m_context.getDefaultAllocator();
+	Move<VkBuffer>					buffer;
+	const deUint32					bufferSize			= src.getDataSize();
+	de::MovePtr<Allocation>			bufferAlloc;
+	const deUint32					arraySize			= getArraySize(parms);
+	const VkExtent3D				imageExtent			= getExtent3D(parms);
+	std::vector <VkBufferImageCopy>	copyRegions;
+
+	// Create source buffer
+	{
+		const VkBufferCreateInfo	bufferParams		=
+		{
+			VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,		// VkStructureType		sType;
+			DE_NULL,									// const void*			pNext;
+			0u,											// VkBufferCreateFlags	flags;
+			bufferSize,									// VkDeviceSize			size;
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,			// VkBufferUsageFlags	usage;
+			VK_SHARING_MODE_EXCLUSIVE,					// VkSharingMode		sharingMode;
+			1u,											// deUint32				queueFamilyIndexCount;
+			&queueFamilyIndex,							// const deUint32*		pQueueFamilyIndices;
+		};
+
+		buffer		= createBuffer(vk, vkDevice, &bufferParams);
+		bufferAlloc = allocateBuffer(vki, vk, vkPhysDevice, vkDevice, *buffer, MemoryRequirement::HostVisible, memAlloc, m_params.allocationKind);
+		VK_CHECK(vk.bindBufferMemory(vkDevice, *buffer, bufferAlloc->getMemory(), bufferAlloc->getOffset()));
+	}
+
+	// Barriers for copying buffer to image
+	const VkBufferMemoryBarrier		preBufferBarrier	=
+	{
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,		// VkStructureType	sType;
+		DE_NULL,										// const void*		pNext;
+		VK_ACCESS_HOST_WRITE_BIT,						// VkAccessFlags	srcAccessMask;
+		VK_ACCESS_TRANSFER_READ_BIT,					// VkAccessFlags	dstAccessMask;
+		VK_QUEUE_FAMILY_IGNORED,						// deUint32			srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,						// deUint32			dstQueueFamilyIndex;
+		*buffer,										// VkBuffer			buffer;
+		0u,												// VkDeviceSize		offset;
+		bufferSize										// VkDeviceSize		size;
+	};
+
+	const VkImageAspectFlags		formatAspect		= VK_IMAGE_ASPECT_COLOR_BIT;
+
+	const VkImageMemoryBarrier		preImageBarrier		=
+	{
+		VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,			// VkStructureType			sType;
+		DE_NULL,										// const void*				pNext;
+		0u,												// VkAccessFlags			srcAccessMask;
+		VK_ACCESS_TRANSFER_WRITE_BIT,					// VkAccessFlags			dstAccessMask;
+		VK_IMAGE_LAYOUT_UNDEFINED,						// VkImageLayout			oldLayout;
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,			// VkImageLayout			newLayout;
+		VK_QUEUE_FAMILY_IGNORED,						// deUint32					srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,						// deUint32					dstQueueFamilyIndex;
+		image,											// VkImage					image;
+		{												// VkImageSubresourceRange	subresourceRange;
+			formatAspect,	// VkImageAspectFlags	aspect;
+			0u,				// deUint32				baseMipLevel;
+			1u,				// deUint32				mipLevels;
+			0u,				// deUint32				baseArraySlice;
+			arraySize,		// deUint32				arraySize;
+		}
+	};
+
+	const VkImageMemoryBarrier		postImageBarrier	=
+	{
+		VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,			// VkStructureType			sType;
+		DE_NULL,										// const void*				pNext;
+		VK_ACCESS_TRANSFER_WRITE_BIT,					// VkAccessFlags			srcAccessMask;
+		VK_ACCESS_TRANSFER_WRITE_BIT,					// VkAccessFlags			dstAccessMask;
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,			// VkImageLayout			oldLayout;
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,			// VkImageLayout			newLayout;
+		VK_QUEUE_FAMILY_IGNORED,						// deUint32					srcQueueFamilyIndex;
+		VK_QUEUE_FAMILY_IGNORED,						// deUint32					dstQueueFamilyIndex;
+		image,											// VkImage					image;
+		{												// VkImageSubresourceRange	subresourceRange;
+			formatAspect,				// VkImageAspectFlags	aspect;
+			0u,							// deUint32				baseMipLevel;
+			1u,							// deUint32				mipLevels;
+			0u,							// deUint32				baseArraySlice;
+			arraySize,					// deUint32				arraySize;
+		}
+	};
+
+	const VkBufferImageCopy	copyRegion	=
+	{
+		0u,												// VkDeviceSize				bufferOffset;
+		imageExtent.width,								// deUint32					bufferRowLength;
+		imageExtent.height,								// deUint32					bufferImageHeight;
+		{
+			VK_IMAGE_ASPECT_COLOR_BIT,					// VkImageAspectFlags	aspect;
+			1u,											// deUint32				mipLevel;
+			0u,											// deUint32				baseArrayLayer;
+			arraySize,									// deUint32				layerCount;
+		},												// VkImageSubresourceLayers	imageSubresource;
+		{ 0, 0, 0 },									// VkOffset3D				imageOffset;
+		imageExtent										// VkExtent3D				imageExtent;
+	};
+
+	// Write buffer data
+	deMemcpy(bufferAlloc->getHostPtr(), src.getData(), bufferSize);
+	flushAlloc(vk, vkDevice, *bufferAlloc);
+
+	// Copy buffer to image
+	beginCommandBuffer(vk, *m_cmdBuffer);
+	vk.cmdPipelineBarrier(*m_cmdBuffer, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, (VkDependencyFlags)0, 0, (const VkMemoryBarrier*)DE_NULL,
+						  1, &preBufferBarrier, 1, &preImageBarrier);
+	vk.cmdCopyBufferToImage(*m_cmdBuffer, *buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copyRegion);
+	vk.cmdPipelineBarrier(*m_cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, (VkDependencyFlags)0, 0, (const VkMemoryBarrier*)DE_NULL, 0, (const VkBufferMemoryBarrier*)DE_NULL, 1, &postImageBarrier);
+	endCommandBuffer(vk, *m_cmdBuffer);
+
+	submitCommandsAndWait(vk, vkDevice, queue, *m_cmdBuffer);
 }
 
 tcu::TestStatus CopiesAndBlittingTestInstance::checkTestResult (tcu::ConstPixelBufferAccess result)
@@ -2196,22 +2347,38 @@ BlittingImages::BlittingImages (Context& context, TestParams params)
 
 tcu::TestStatus BlittingImages::iterate (void)
 {
-	const tcu::TextureFormat	srcTcuFormat		= mapVkFormat(m_params.src.image.format);
+	const VkFormat srcFormat						= m_params.src.image.format;
+	bool srcCompressed								= isCompressedFormat(srcFormat);
+	const tcu::TextureFormat	srcTcuFormat		= srcCompressed ? tcu::getUncompressedFormat(mapVkCompressedFormat(srcFormat)) : mapVkFormat(srcFormat);
 	const tcu::TextureFormat	dstTcuFormat		= mapVkFormat(m_params.dst.image.format);
 	m_sourceTextureLevel = de::MovePtr<tcu::TextureLevel>(new tcu::TextureLevel(srcTcuFormat,
 																				m_params.src.image.extent.width,
 																				m_params.src.image.extent.height,
 																				m_params.src.image.extent.depth));
-	generateBuffer(m_sourceTextureLevel->getAccess(), m_params.src.image.extent.width, m_params.src.image.extent.height, m_params.src.image.extent.depth, FILL_MODE_GRADIENT);
+
+	if (srcCompressed)
+	{
+		tcu::CompressedTexture srcCompressedTex(mapVkCompressedFormat(srcFormat),
+												m_params.src.image.extent.width,
+												m_params.src.image.extent.height,
+												m_params.src.image.extent.depth);
+		generateCompressedBuffer(srcCompressedTex, m_sourceTextureLevel->getAccess());
+		uploadCompressedImage(srcCompressedTex, m_source.get(), m_params.src.image);
+	}
+	else
+	{
+		generateBuffer(m_sourceTextureLevel->getAccess(), m_params.src.image.extent.width, m_params.src.image.extent.height, m_params.src.image.extent.depth, FILL_MODE_GRADIENT);
+		uploadImage(m_sourceTextureLevel->getAccess(), m_source.get(), m_params.src.image);
+	}
+
 	m_destinationTextureLevel = de::MovePtr<tcu::TextureLevel>(new tcu::TextureLevel(dstTcuFormat,
 																					 (int)m_params.dst.image.extent.width,
 																					 (int)m_params.dst.image.extent.height,
 																					 (int)m_params.dst.image.extent.depth));
 	generateBuffer(m_destinationTextureLevel->getAccess(), m_params.dst.image.extent.width, m_params.dst.image.extent.height, m_params.dst.image.extent.depth, FILL_MODE_WHITE);
-	generateExpectedResult();
-
-	uploadImage(m_sourceTextureLevel->getAccess(), m_source.get(), m_params.src.image);
 	uploadImage(m_destinationTextureLevel->getAccess(), m_destination.get(), m_params.dst.image);
+
+	generateExpectedResult();
 
 	const DeviceInterface&		vk					= m_context.getDeviceInterface();
 	const VkDevice				vkDevice			= m_context.getDevice();
@@ -7232,7 +7399,7 @@ void addBlittingImageAllFormatsColorSrcFormatTests (tcu::TestCaseGroup* group, B
 	for (int dstFormatIndex = 0; testParams.compatibleFormats[dstFormatIndex] != VK_FORMAT_UNDEFINED; ++dstFormatIndex)
 	{
 		testParams.params.dst.image.format	= testParams.compatibleFormats[dstFormatIndex];
-		if (!isSupportedByFramework(testParams.params.dst.image.format))
+		if (!isSupportedByFramework(testParams.params.dst.image.format) || vk::isCompressedFormat(testParams.params.dst.image.format))
 			continue;
 
 		if (!isAllowedBlittingAllFormatsColorSrcFormatTests(testParams))
@@ -7371,38 +7538,38 @@ const VkFormat	compatibleFormatsFloats[]	=
 	VK_FORMAT_R64G64B64A64_SFLOAT,
 	VK_FORMAT_B10G11R11_UFLOAT_PACK32,
 	VK_FORMAT_E5B9G9R9_UFLOAT_PACK32,
-//	VK_FORMAT_BC1_RGB_UNORM_BLOCK,
-//	VK_FORMAT_BC1_RGBA_UNORM_BLOCK,
-//	VK_FORMAT_BC2_UNORM_BLOCK,
-//	VK_FORMAT_BC3_UNORM_BLOCK,
-//	VK_FORMAT_BC4_UNORM_BLOCK,
-//	VK_FORMAT_BC4_SNORM_BLOCK,
-//	VK_FORMAT_BC5_UNORM_BLOCK,
-//	VK_FORMAT_BC5_SNORM_BLOCK,
-//	VK_FORMAT_BC6H_UFLOAT_BLOCK,
-//	VK_FORMAT_BC6H_SFLOAT_BLOCK,
-//	VK_FORMAT_BC7_UNORM_BLOCK,
-//	VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
-//	VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK,
-//	VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
-//	VK_FORMAT_EAC_R11_UNORM_BLOCK,
-//	VK_FORMAT_EAC_R11_SNORM_BLOCK,
-//	VK_FORMAT_EAC_R11G11_UNORM_BLOCK,
-//	VK_FORMAT_EAC_R11G11_SNORM_BLOCK,
-//	VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_5x4_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_5x5_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_6x5_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_6x6_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_8x5_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_8x6_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_8x8_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_10x5_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_10x6_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_10x8_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_10x10_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_12x10_UNORM_BLOCK,
-//	VK_FORMAT_ASTC_12x12_UNORM_BLOCK,
+	VK_FORMAT_BC1_RGB_UNORM_BLOCK,
+	VK_FORMAT_BC1_RGBA_UNORM_BLOCK,
+	VK_FORMAT_BC2_UNORM_BLOCK,
+	VK_FORMAT_BC3_UNORM_BLOCK,
+	VK_FORMAT_BC4_UNORM_BLOCK,
+	VK_FORMAT_BC4_SNORM_BLOCK,
+	VK_FORMAT_BC5_UNORM_BLOCK,
+	VK_FORMAT_BC5_SNORM_BLOCK,
+	VK_FORMAT_BC6H_UFLOAT_BLOCK,
+	VK_FORMAT_BC6H_SFLOAT_BLOCK,
+	VK_FORMAT_BC7_UNORM_BLOCK,
+	VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
+	VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK,
+	VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
+	VK_FORMAT_EAC_R11_UNORM_BLOCK,
+	VK_FORMAT_EAC_R11_SNORM_BLOCK,
+	VK_FORMAT_EAC_R11G11_UNORM_BLOCK,
+	VK_FORMAT_EAC_R11G11_SNORM_BLOCK,
+	VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
+	VK_FORMAT_ASTC_5x4_UNORM_BLOCK,
+	VK_FORMAT_ASTC_5x5_UNORM_BLOCK,
+	VK_FORMAT_ASTC_6x5_UNORM_BLOCK,
+	VK_FORMAT_ASTC_6x6_UNORM_BLOCK,
+	VK_FORMAT_ASTC_8x5_UNORM_BLOCK,
+	VK_FORMAT_ASTC_8x6_UNORM_BLOCK,
+	VK_FORMAT_ASTC_8x8_UNORM_BLOCK,
+	VK_FORMAT_ASTC_10x5_UNORM_BLOCK,
+	VK_FORMAT_ASTC_10x6_UNORM_BLOCK,
+	VK_FORMAT_ASTC_10x8_UNORM_BLOCK,
+	VK_FORMAT_ASTC_10x10_UNORM_BLOCK,
+	VK_FORMAT_ASTC_12x10_UNORM_BLOCK,
+	VK_FORMAT_ASTC_12x12_UNORM_BLOCK,
 
 	VK_FORMAT_UNDEFINED
 };
