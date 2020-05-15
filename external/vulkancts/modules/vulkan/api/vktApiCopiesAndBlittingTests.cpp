@@ -451,7 +451,7 @@ void CopiesAndBlittingTestInstance::generateBuffer (tcu::PixelBufferAccess buffe
 	}
 }
 
-void CopiesAndBlittingTestInstance::generateCompressedBuffer (tcu::CompressedTexture &compressed, tcu::PixelBufferAccess decompressed)
+void CopiesAndBlittingTestInstance::generateCompressedBuffer (tcu::CompressedTexture& compressed, tcu::PixelBufferAccess decompressed)
 {
 	// Generate random compressed data and update decompressed data
 
@@ -660,7 +660,6 @@ void CopiesAndBlittingTestInstance::uploadCompressedImage (const tcu::Compressed
 	de::MovePtr<Allocation>			bufferAlloc;
 	const deUint32					arraySize			= getArraySize(parms);
 	const VkExtent3D				imageExtent			= getExtent3D(parms);
-	std::vector <VkBufferImageCopy>	copyRegions;
 
 	// Create source buffer
 	{
@@ -744,7 +743,7 @@ void CopiesAndBlittingTestInstance::uploadCompressedImage (const tcu::Compressed
 		imageExtent.height,								// deUint32					bufferImageHeight;
 		{
 			VK_IMAGE_ASPECT_COLOR_BIT,					// VkImageAspectFlags	aspect;
-			1u,											// deUint32				mipLevel;
+			0u,											// deUint32				mipLevel;
 			0u,											// deUint32				baseArrayLayer;
 			arraySize,									// deUint32				layerCount;
 		},												// VkImageSubresourceLayers	imageSubresource;
