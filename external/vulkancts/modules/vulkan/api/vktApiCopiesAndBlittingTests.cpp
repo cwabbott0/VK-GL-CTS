@@ -659,7 +659,7 @@ void CopiesAndBlittingTestInstance::uploadCompressedImage (const tcu::Compressed
 	const deUint32					bufferSize			= src.getDataSize();
 	de::MovePtr<Allocation>			bufferAlloc;
 	const deUint32					arraySize			= getArraySize(parms);
-	const VkExtent3D				imageExtent			= getExtent3D(parms);
+	const VkExtent3D				imageExtent			= parms.extent;
 
 	// Create source buffer
 	{
