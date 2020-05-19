@@ -739,8 +739,8 @@ void CopiesAndBlittingTestInstance::uploadCompressedImage (const tcu::Compressed
 	const VkBufferImageCopy	copyRegion	=
 	{
 		0u,												// VkDeviceSize				bufferOffset;
-		imageExtent.width,								// deUint32					bufferRowLength;
-		imageExtent.height,								// deUint32					bufferImageHeight;
+		0u,												// deUint32					bufferRowLength;
+		0u,												// deUint32					bufferImageHeight;
 		{
 			VK_IMAGE_ASPECT_COLOR_BIT,					// VkImageAspectFlags	aspect;
 			0u,											// deUint32				mipLevel;
@@ -2298,7 +2298,7 @@ BlittingImages::BlittingImages (Context& context, TestParams params)
 			getCreateFlags(m_params.src.image),		// VkImageCreateFlags	flags;
 			m_params.src.image.imageType,			// VkImageType			imageType;
 			m_params.src.image.format,				// VkFormat				format;
-			getExtent3D(m_params.src.image),		// VkExtent3D			extent;
+			m_params.src.image.extent,				// VkExtent3D			extent;
 			1u,										// deUint32				mipLevels;
 			getArraySize(m_params.src.image),		// deUint32				arraySize;
 			VK_SAMPLE_COUNT_1_BIT,					// deUint32				samples;
