@@ -635,6 +635,8 @@ public:
 																								 VkDeviceAddress								deviceAddress			= 0u);
 
 	virtual const VkAccelerationStructureKHR*			getPtr									(void) const = DE_NULL;
+	virtual const vk::Allocation&						getAllocation							(void) = DE_NULL;
+	virtual const vk::VkBuffer&							getBuffer								(void) = DE_NULL;
 protected:
 	std::vector<de::SharedPtr<RaytracedGeometryBase>>	m_geometriesData;
 	VkDeviceSize										m_structureSize;
@@ -752,6 +754,8 @@ public:
 																										 const VkDevice								device,
 																										 size_t										instanceIndex,
 																										 const VkTransformMatrixKHR&				matrix) = 0;
+	virtual const vk::Allocation&									getAllocation						 (void) = DE_NULL;
+	virtual const vk::VkBuffer&										getBuffer						     (void) = DE_NULL;
 
 protected:
 	std::vector<de::SharedPtr<BottomLevelAccelerationStructure> >	m_bottomLevelInstances;

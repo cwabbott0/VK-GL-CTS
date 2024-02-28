@@ -907,6 +907,8 @@ public:
 																											 SerialStorage*									storage) override;
 
 	const VkAccelerationStructureKHR*						getPtr											(void) const override;
+	const vk::Allocation&									getAllocation									(void) override;
+	const vk::VkBuffer&										getBuffer										(void) override;
 
 protected:
 	VkAccelerationStructureBuildTypeKHR						m_buildType;
@@ -1453,6 +1455,16 @@ void BottomLevelAccelerationStructureKHR::prepareGeometries (const DeviceInterfa
 	}
 }
 
+const vk::Allocation& BottomLevelAccelerationStructureKHR::getAllocation(void)
+{
+	return m_accelerationStructureBuffer->getAllocation();
+}
+
+const vk::VkBuffer& BottomLevelAccelerationStructureKHR::getBuffer(void)
+{
+	return m_accelerationStructureBuffer->get();
+}
+
 deUint32 BottomLevelAccelerationStructure::getRequiredAllocationCount (void)
 {
 	return BottomLevelAccelerationStructureKHR::getRequiredAllocationCount();
@@ -1733,6 +1745,8 @@ public:
 																												 const VkDevice									device,
 																												 size_t											instanceIndex,
 																												 const VkTransformMatrixKHR&					matrix) override;
+	const vk::Allocation&									getAllocation										(void) override;
+	const vk::VkBuffer&										getBuffer											(void) override;
 
 protected:
 	VkAccelerationStructureBuildTypeKHR						m_buildType;
@@ -2447,6 +2461,16 @@ void TopLevelAccelerationStructureKHR::prepareInstances (const DeviceInterface&	
 		makeVkAccelerationStructureInstancesDataKHR(accelerationStructureGeometryInstancesDataKHR),	//  VkAccelerationStructureGeometryDataKHR	geometry;
 		(VkGeometryFlagsKHR)0u																		//  VkGeometryFlagsKHR						flags;
 	};
+}
+
+const vk::Allocation& TopLevelAccelerationStructureKHR::getAllocation(void)
+{
+	return m_accelerationStructureBuffer->getAllocation();
+}
+
+const vk::VkBuffer& TopLevelAccelerationStructureKHR::getBuffer(void)
+{
+	return m_accelerationStructureBuffer->get();
 }
 
 deUint32 TopLevelAccelerationStructure::getRequiredAllocationCount (void)
