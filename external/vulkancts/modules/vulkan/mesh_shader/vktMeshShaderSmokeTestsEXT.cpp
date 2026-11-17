@@ -1686,9 +1686,9 @@ void SharedFragLibraryCase::initPrograms(vk::SourceCollections &programCollectio
          << "    gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);\n"
          << "    gl_PrimitiveTriangleIndicesEXT[1] = uvec3(2, 1, 3);\n"
          << (useLayer ? "    gl_MeshPrimitivesEXT[0].gl_Layer = 2;\n" :
-                        "    gl_MeshPrimitivesEXT[0].gl_PrimitiveID = 0;\n")
+                        "    gl_MeshPrimitivesEXT[0].gl_PrimitiveID = 1;\n")
          << (useLayer ? "    gl_MeshPrimitivesEXT[1].gl_Layer = 2;\n" :
-                        "    gl_MeshPrimitivesEXT[1].gl_PrimitiveID = 1;\n")
+                        "    gl_MeshPrimitivesEXT[1].gl_PrimitiveID = 0;\n")
          << "}\n";
     programCollection.glslSources.add("mesh") << glu::MeshSource(mesh.str()) << meshBuildOptions;
 
@@ -2245,7 +2245,7 @@ tcu::TestStatus SharedFragLibraryInstance::iterate(void)
                 {
                     const auto expectedColor =
                         (m_params.primitiveID ?
-                             tcu::Vec4(layerColors.at(2u).x(), layerColors.at(2u).y(), static_cast<float>(y), 1.0f) :
+                             tcu::Vec4(layerColors.at(2u).x(), layerColors.at(2u).y(), static_cast<float>(i == 0 ? y : 1 - y), 1.0f) :
                              layerColors.at(z));
                     const auto resultColor = resultAccess.getPixel(x, y, z);
                     if (resultColor != expectedColor)
