@@ -427,6 +427,7 @@ tcu::TestStatus MeshShaderMiscInstance::iterate()
                                   &descriptorSet.get(), 0u, nullptr);
     }
     vkd.cmdDrawMeshTasksEXT(cmdBuffer, drawCount.x(), drawCount.y(), drawCount.z());
+    vkd.cmdDrawMeshTasksEXT(cmdBuffer, drawCount.x(), drawCount.y(), drawCount.z());
     endRenderPass(vkd, cmdBuffer);
 
     // Copy color buffer to verification buffer.
@@ -969,7 +970,7 @@ void MaxPointsCase::initPrograms(vk::SourceCollections &programCollection) const
          << "        gl_MeshVerticesEXT[pixId].gl_Position = vec4(xCoord, yCoord, 0.0f, 1.0f);\n"
          << "        gl_MeshVerticesEXT[pixId].gl_PointSize = 1.0f;\n"
          << "        gl_PrimitivePointIndicesEXT[pixId] = pixId;\n"
-         << "        pointColor[pixId] = vec4(((xCoord + 1.0f) / 2.0f), ((yCoord + 1.0f) / 2.0f), 0.0f, 1.0f);\n"
+         << "        pointColor[pixId] = vec4(((xCoord + 1.0f) / 4.0f), ((yCoord + 1.0f) / 4.0f), 0.0f, 1.0f);\n"
          << "    }\n"
          << "}\n";
     programCollection.glslSources.add("mesh") << glu::MeshSource(mesh.str()) << buildOptions;
